@@ -20,6 +20,7 @@ After installation the app can be accessed through [Toolbar] --> [Round Vertexl]
 
 * Round vertex
 * Round inner corner vertex
+* Feature inspired from post: https://www.klayout.de/forum/discussion/2235/rounding-corner-of-a-single-point-in-a-structure
 
 # Apply vertex rounding
 <p align="center">
