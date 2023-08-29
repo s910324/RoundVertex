@@ -1,0 +1,346 @@
+<?xml version="1.0" encoding="utf-8"?>
+<klayout-macro>
+ <description/>
+ <version/>
+ <category>pymacros</category>
+ <prolog/>
+ <epilog/>
+ <doc/>
+ <autorun>true</autorun>
+ <autorun-early>false</autorun-early>
+ <priority>0</priority>
+ <shortcut/>
+ <show-in-menu>false</show-in-menu>
+ <group-name/>
+ <menu-path/>
+ <interpreter>python</interpreter>
+ <dsl-interpreter-name/>
+ <text>import os 
+import pya
+import math
+
+class RoundVertexSetupDock(pya.QDockWidget):
+    def __init__(self):
+        super(RoundVertexSetupDock, self).__init__()
+        self.rndVtxSetup = RoundVertexSetupWidget()
+        self.setWidget (self.rndVtxSetup)
+        self.setWindowTitle("Round Vertex")
+        
+    def setHostValue(self, host, roundRadius, roundPoints):
+        self.rndVtxSetup.setHostValue(host, roundRadius, roundPoints)
+        
+        
+class RoundVertexSetupWidget(pya.QWidget):
+    def __init__(self):
+        super(RoundVertexSetupWidget, self).__init__()
+        self.host         = None
+        self.rndRadLB     = pya.QLabel("Round Radius:")
+        self.rndPtsLB     = pya.QLabel("Round Points:")
+        self.rndRadSfxLB  = pya.QLabel("um")
+        self.rndRadDSB    = pya.QDoubleSpinBox()
+        self.rndPtsSB     = pya.QSpinBox()
+        self.layout       = pya.QGridLayout()
+
+        self.rndRadDSB.setRange (0.0001, 10000)
+        self.rndRadDSB.setDecimals (5)
+        self.rndRadDSB.setSingleStep (1)
+
+        self.rndPtsSB.setRange (4, 256)
+        self.rndPtsSB.setSingleStep (1)
+
+
+        self.layout.addWidget(self.rndRadLB,    0, 0, 1, 1)
+        self.layout.addWidget(self.rndRadDSB,   0, 1, 1, 1)
+        self.layout.addWidget(self.rndRadSfxLB, 0, 2, 1, 1)
+
+        self.layout.addWidget(self.rndPtsLB,    1, 0, 1, 1)
+        self.layout.addWidget(self.rndPtsSB,    1, 1, 1, 1)
+        
+        self.layout.setRowStretch(2, 1)
+        self.setLayout(self.layout)
+        
+        self.rndRadDSB.valueChanged (lambda :self.updateHostValue())
+        self.rndPtsSB.valueChanged  (lambda :self.updateHostValue())
+    
+    def setHostValue(self, host, roundRadius, roundPoints):
+        self.host = host
+        self.rndPtsSB.setValue(roundPoints)
+        self.rndRadDSB.setValue(roundRadius)
+    
+    def updateHostValue(self): 
+        if self.host:  
+            self.host.roundRadius = self.rndRadDSB.value
+            self.host.roundPoints = self.rndPtsSB.value
+         
+    def hideEvent(self, event):
+        if self.host:
+            self.host.deactive()
+        event.accept()
+
+        
+class RoundVertexPlugin(pya.Plugin):
+    def __init__(self, view):
+        super(RoundVertexPlugin, self).__init__()
+        self.rndVtxDock      = None
+        self.view            = view
+        self.roundRadius     = 0.5
+        self.roundPoints     = 32
+        self.withSelected    = False
+        self.selectedObj     = None
+        self.selectedPoly    = None  
+        self.selectedObjBox  = None  
+
+        self.cutMarkers      = None
+        self.cutMasks        = None
+        self.toolTip         = pya.QToolTip()       
+
+    def activated(self):
+        self.validselect()
+        if self.withSelected:
+            if not(self.rndVtxDock):
+                mw   = pya.Application.instance().main_window()
+                self.rndVtxDock = RoundVertexSetupDock()
+                mw.addDockWidget(pya.Qt_DockWidgetArea.RightDockWidgetArea, self.rndVtxDock)
+                self.rndVtxDock.setHostValue(self, self.roundRadius, self.roundPoints)
+            self.rndVtxDock.show()
+            
+    def deactivated(self):
+        self._clear_marker()
+        self.ungrab_mouse()
+        if (self.rndVtxDock):
+            self.rndVtxDock.hide()
+
+    def deactive(self):
+        esc_key  = 16777216 
+        keyPress = pya.QKeyEvent(pya.QKeyEvent.KeyPress, esc_key, pya.Qt.NoModifier)
+        pya.QApplication.sendEvent(self.view.widget(), keyPress)        
+
+    def validselect(self):
+        unit         = self.view.active_cellview().layout().dbu
+        selectedObjs = [o for o in self.view.each_object_selected() if not(o.is_cell_inst())]
+        if len(selectedObjs) == 1:
+            o                   = selectedObjs[0]
+            self.selectedPoly   = o.shape.polygon.transformed(o.trans()).to_dtype(unit)
+            self.selectedObj    = o
+            self.selectedObjBox = self.selectedPoly.bbox()
+            self.withSelected   = True
+        else:
+            self.withSelected   = False
+
+            
+    def _clear_marker(self):
+        self._clear_cut_marker()
+
+    def _clear_cut_marker(self):
+        if self.cutMarkers is not None:
+            for marker in self.cutMarkers:
+                marker._destroy()
+            self.cutMarkers = None
+            self.cutMasks   = None
+
+    def _update_marker(self):
+        self._update_cut_marker()
+
+    def _update_cut_marker(self):
+        if self.cutMasks:
+        
+            if self.cutMarkers:
+                for marker in self.cutMarkers:
+                    marker._destroy()
+                    
+            self.cutMarkers = []
+                    
+            for i, edgeDict in enumerate(self.cutMasks):
+                mark = edgeDict["mark"]
+                show = edgeDict["show"]
+                
+                if show:
+                    marker             = pya.Marker(self.view)
+                    marker.line_style  = 0
+                    marker.line_width  = 1
+                    marker.vertex_size = 4 
+                    self.cutMarkers.append(marker)
+                    self.cutMarkers[i].set(mark)
+                    self.cutMarkers[i].dither_pattern=2
+            
+        else:
+            self._clear_cut_marker()
+
+    def mouse_click_event(self, p, buttons, prio):
+        if prio:
+            if buttons in [8]:
+                self.view.transaction("round vertex")
+                try:
+                    cellView = self.view.active_cellview()
+                    cell     = cellView.cell
+                    unit     = cellView.layout().dbu
+                    shape    = self.selectedObj.shape
+                    layer    = shape.layer
+                    section  = 0
+                    out_reg  = pya.Region()
+                    poly_reg = pya.Region(self.selectedPoly.to_itype(unit)) 
+                    
+                    for edgeDict in self.cutMasks:
+                        mask     = edgeDict["mark"]
+                        method   = edgeDict["type"]
+                        out_reg += pya.Region(mask.to_itype(unit)).snapped(1, 1)
+
+                            
+                    if method == "cut":
+                        out_reg = poly_reg - out_reg
+                        
+                    if method == "patch":
+                        out_reg = poly_reg + out_reg
+
+                    if not(out_reg.is_empty()):    
+                        cell.shapes(layer).insert(out_reg.merged())
+                        shape.delete()
+                    
+                finally:
+                    self.view.commit()
+                self.deactive()
+                
+            if buttons in [16, 32]:
+                nextIndex         = (self.directions.index(self.cutDirection) + 1 )
+                nextIndex         = nextIndex if nextIndex &lt; len(self.directions) else 0
+                self.cutDirection = self.directions[nextIndex]
+                self._clear_cut_marker()
+                self.update_cut_edge(p)
+                self._update_cut_marker()
+                
+            self._update_marker()
+            return True
+        return False
+
+    def mouse_moved_event(self, p, buttons, prio):
+        if prio:
+            if self.withSelected:
+                self.set_cursor(pya.Cursor.Cross)
+                v, e1, e2     = self.updateSelectVertex(p, self.selectedPoly)
+                masks         = self.roundingMask(v, e1, e2, self.roundRadius, self.roundPoints)
+                self.cutMasks = masks
+ 
+            else:
+                self.toolTip.showText( pya.QCursor.pos, "Select one shape for split shape") 
+                self.deactive()
+                
+            self._update_marker()
+            return True
+        return False
+        
+    
+    def roundingMask(self, p, e1, e2, radius, points):
+        results      = []
+        cellView     = self.view.active_cellview()
+        unit         = cellView.layout().dbu
+        vec1         = e1.p2 - e1.p1
+        vec2         = e2.p1 - e2.p2
+        innerAngle   = self.vectorAngle(vec1, vec2)
+        direction    = 1
+        
+        if innerAngle &lt; 0:
+            innerAngle = abs(innerAngle)
+            direction  = -1
+
+        centerAngle  = (math.pi/2) - (innerAngle/2)
+        vec1Leng     = e1.p2.distance(e1.p1)
+        vec2Leng     = e2.p2.distance(e2.p1) 
+        vec1Unit     = vec1 / vec1Leng
+        vec2Unit     = vec2 / vec2Leng
+        vec1Tan      = radius * math.tan(centerAngle) * vec1Unit 
+        vec2Tan      = radius * math.tan(centerAngle) * vec2Unit
+        vec1NormUnit = pya.DVector(vec1Unit.y, -vec1Unit.x)
+        vec2NormUnit = pya.DVector(vec2Unit.y, -vec2Unit.x)
+        vec1NormRadi = radius * vec1NormUnit
+        vec2NormRadi = radius * vec2NormUnit
+        n = pya.Vector(1, 0).to_dtype(unit)
+        m = pya.Vector(0, 1).to_dtype(unit)
+        r1           = p - vec1Tan
+        r2           = p - vec2Tan
+        c            = r1 + (vec1NormRadi * direction)
+        if max([vec1Tan.length(), vec2Tan.length()]) &lt;= min([vec1.length(), vec2.length()]):
+            rad       = 2 * math.pi * (1/points)
+            circleAry = [c + radius * pya.DPoint( math.cos(rad * i), math.sin(rad * i)) for i in range(points + 1)]
+            
+            dr1 = [r1.distance(cp) for cp in circleAry]
+            circleAry[dr1.index(min(dr1))] = r1
+            
+            dr2 = [r2.distance(cp) for cp in circleAry]
+            circleAry[dr2.index(min(dr2))] = r2
+            
+            circleReg  = pya.Region(pya.DPolygon(circleAry).to_itype(unit))
+            cornerReg  = pya.Region(pya.DPolygon([r1, p, r2, c]).to_itype(unit))
+            vertexPoly = pya.DPolygon([p-n-m, p-n+m, p+n+m, p+n-m])
+            mask       = cornerReg - circleReg
+            
+            results    = [ {
+                "mark" : poly.to_dtype(unit), 
+                "type" : "cut" if direction &gt; 0 else "patch",
+                "show" : True
+            } for poly in mask.each() ]
+            
+            results.append({
+                "mark" : vertexPoly,          
+                "type" : "cut" if direction &gt; 0 else "patch",
+                "show" : False
+            })
+            
+        else:
+            results   = [{
+                "mark" : pya.DEdge(p, p),
+                "type" : "vertex",
+                "show" : True
+            }]
+            
+        return results
+        
+ 
+    def angle(self, arc):
+        return(arc/(2 * math.pi)*360)
+        
+    def arc(self, angle):
+        return (angle/360) * 2 * math.pi
+                    
+    def vectorAngle(self, v1, v2):
+        angle      = math.asin(round(v1.vprod(v2) / (v1.abs() * v2.abs()), 5))
+        sign       = v1.sprod_sign(v2)
+        innerAngle = abs(angle - math.pi) if  sign &lt; 0 else angle
+        innerAngle = innerAngle - ((2 * math.pi) if innerAngle &gt; math.pi else 0)
+        return innerAngle
+
+    def updateSelectVertex(self, p, polygon):
+        minDistance    = math.inf
+        selectedVertex = None
+        selectrdEdge1  = None
+        selectrdEdge2  = None
+        edges          = [e for e in polygon.each_edge()]
+        edges.append(edges[0])
+
+        for i in range(len(edges)-1):
+            e1 = edges[i]
+            e2 = edges[i+1] 
+            d  = p.distance(e1.p2)
+
+            if d &lt; minDistance:
+                minDistance    = d 
+                selectedVertex = e1.p2
+                selectrdEdge1  = e1
+                selectrdEdge2  = e2
+                             
+        return selectedVertex, selectrdEdge1, selectrdEdge2
+            
+class RoundVertexPluginFactory(pya.PluginFactory):
+    def __init__(self):
+        super(RoundVertexPluginFactory, self).__init__()
+        iconPath = str(os.path.dirname(__file__)) + "/RoundVertexIcon/%s.png"
+        self.register(-1000, "Round Vertex", "Round Vertex", iconPath % "icon")
+
+    def create_plugin(self, manager, root, view):
+        return RoundVertexPlugin(view)
+
+RoundVertexPluginFactory.instance = RoundVertexPluginFactory()
+
+
+
+        </text>
+</klayout-macro>
