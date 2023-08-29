@@ -13,10 +13,15 @@ After installation the app can be accessed through [Toolbar] --> [Round Vertexl]
 
 
 # Functions
+
+<p align="center">
+<img align="middle" src="https://github.com/s910324/RoundVertex/assets/1561043/61391d40-7e0d-46b8-b686-bca1c125d5b0" alt="Screen shot" width="800"/>
+</p>
+
 * Round vertex
 * Round inner corner vertex
 
-
+# Apply vertex rounding
 <p align="center">
 <img align="middle" src="https://github.com/s910324/RoundVertex/assets/1561043/b4312791-5542-4ddb-bf9f-6011eb94c970" alt="Screen shot" width="800"/>
 </p>
