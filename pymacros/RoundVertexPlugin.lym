@@ -6,7 +6,7 @@
  <prolog/>
  <epilog/>
  <doc/>
- <autorun>true</autorun>
+ <autorun>false</autorun>
  <autorun-early>false</autorun-early>
  <priority>0</priority>
  <shortcut/>
@@ -151,17 +151,40 @@ class RoundVertexPlugin(pya.Plugin):
             self.cutMarkers = []
                     
             for i, edgeDict in enumerate(self.cutMasks):
-                mark = edgeDict["mark"]
-                show = edgeDict["show"]
+                mark   = edgeDict["mark"]
+                show   = edgeDict["show"]
+                mkType = edgeDict["type"]
                 
                 if show:
-                    marker             = pya.Marker(self.view)
-                    marker.line_style  = 0
-                    marker.line_width  = 1
-                    marker.vertex_size = 4 
+                    marker = pya.Marker(self.view)
+                    
+                    if mkType in ["patch", "cut"]:
+                        marker.line_style     = 0
+                        marker.line_width     = 1
+                        marker.vertex_size    = 4 
+                        marker.dither_pattern = 2
+                    
+                    elif mkType in ["deco"]:
+                        marker.line_style     = 1
+                        marker.line_width     = 1
+                        marker.vertex_size    = 0 
+                        marker.dither_pattern = -1
+                        
+                    elif mkType in ["text"]:
+                        marker.line_style     = 0
+                        marker.line_width     = 1
+                        marker.vertex_size    = 0 
+                        marker.dither_pattern = -1
+                        
+                    elif mkType in ["vertex"]:
+                        marker.line_style     = 0
+                        marker.line_width     = 1
+                        marker.vertex_size    = 4 
+                        marker.dither_pattern = 0
+                                            
                     self.cutMarkers.append(marker)
                     self.cutMarkers[i].set(mark)
-                    self.cutMarkers[i].dither_pattern=2
+
             
         else:
             self._clear_cut_marker()
@@ -171,34 +194,47 @@ class RoundVertexPlugin(pya.Plugin):
             if buttons in [8]:
                 self.view.transaction("round vertex")
                 try:
-                    cellView = self.view.active_cellview()
-                    cell     = cellView.cell
-                    unit     = cellView.layout().dbu
-                    shape    = self.selectedObj.shape
-                    layer    = shape.layer
-                    section  = 0
-                    out_reg  = pya.Region()
-                    poly_reg = pya.Region(self.selectedPoly.to_itype(unit)) 
+                    cellView      = self.view.active_cellview()
+                    cell          = cellView.cell
+                    unit          = cellView.layout().dbu
+                    shape         = self.selectedObj.shape
+                    layer         = shape.layer
+                    section       = 0
+                    out_reg       = pya.Region()
+                    poly_reg      = pya.Region(self.selectedPoly.to_itype(unit)) 
+                    roundedShape  = None
                     
+
                     for edgeDict in self.cutMasks:
                         mask     = edgeDict["mark"]
                         method   = edgeDict["type"]
-                        out_reg += pya.Region(mask.to_itype(unit)).snapped(1, 1)
-
+                        
+                        if method in ["cut", "patch"]:
+                            out_reg += pya.Region(mask.to_itype(unit)).snapped(1, 1)
                             
                     if method == "cut":
                         out_reg = poly_reg - out_reg
                         
                     if method == "patch":
                         out_reg = poly_reg + out_reg
-
-                    if not(out_reg.is_empty()):    
-                        cell.shapes(layer).insert(out_reg.merged())
+    
+                    if not(out_reg.is_empty()): 
+                        roundedShape = cell.shapes(layer).insert([s for s in out_reg.each_merged()][0])
+                        #roundedShape  = roundedShapes[-1]
                         shape.delete()
-                    
+
+                    if roundedShape:
+                        o          = pya.ObjectInstPath()
+                        o.layer    = layer
+                        o.shape    = roundedShape
+                        o.top      = cell.cell_index()
+                        o.cv_index = cellView.index()
+                        self.view.object_selection = [ o ]
+                        self.validselect()
+                        
                 finally:
                     self.view.commit()
-                self.deactive()
+                #self.deactive()
                 
             if buttons in [16, 32]:
                 nextIndex         = (self.directions.index(self.cutDirection) + 1 )
@@ -286,11 +322,49 @@ class RoundVertexPlugin(pya.Plugin):
             })
             
         else:
-            results   = [{
-                "mark" : pya.DEdge(p, p),
-                "type" : "vertex",
-                "show" : True
-            }]
+            rad       = 2 * math.pi * (1/points)
+            circleAry = [p + radius * pya.DPoint( math.cos(rad * i), math.sin(rad * i)) for i in range(points + 1)]
+            v1 = pya.DVector(
+                radius * math.cos(math.pi/4),
+                radius * math.sin(math.pi/4),
+            )
+            v2 = pya.DVector(
+                -radius * math.cos(math.pi/4),
+                radius * math.sin(math.pi/4),
+            )            
+
+            results   = [
+                {
+                    "mark" : pya.DPolygon(circleAry), 
+                    "type" : "deco",
+                    "show" : True
+                },
+                
+                {
+                    "mark" : pya.DText("Raduis too large", pya.DTrans(p.x, p.y), radius/3, 0),
+                    "type" : "text",
+                    "show" : True
+                },
+                                
+                {
+                    "mark" : pya.DEdge(p, p),
+                    "type" : "vertex",
+                    "show" : True
+                },
+                
+                {
+                    "mark" : pya.DEdge(p - v1 , p + v1),
+                    "type" : "deco",
+                    "show" : True
+                },
+                
+                {
+                    "mark" : pya.DEdge(p - v2 , p + v2),
+                    "type" : "deco",
+                    "show" : True
+                }
+            ]
+            
             
         return results
         
